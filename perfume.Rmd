@@ -1,0 +1,194 @@
+---
+title: "Perfume"
+output: html_document
+date: "2025-09-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Perfume Dataset Analysis (R)
+
+This repository contains exploratory data analysis of the [Perfume Dataset](https://www.kaggle.com/datasets/ayushghawana/perfume-dataset) using **R**.
+
+## 📌 Introduction
+Perfume is a lifestyle and fashion product that combines **brand identity, pricing, consumer preferences, and sensory attributes**.  
+This project aims to explore patterns within the perfume dataset to understand:
+- Brand distribution
+- Pricing strategies
+- Consumer ratings
+- Longevity and sillage (lasting power & scent projection)
+
+## 🛠️ Tools
+- **RStudio / R Markdown**
+- R packages: `tidyverse`, `dplyr`, `ggplot2`, `readr`, `stringr`
+
+```{r}
+# Define function to check is package is installed
+install_if_missing <- function(pkg){
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE, repos = "https://cloud.r-project.org/")
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# Install and load library
+pkgs <- c("readr","dplyr","tidyr","stringr","janitor","ggplot2","ggrepel")
+invisible(lapply(pkgs, install_if_missing))
+
+```
+
+
+## 📂 Project Structure
+- `data/` → raw dataset and cleaned dataset
+- `scripts/` → R scripts for data cleaning, analysis, visualization, modeling
+- `notebooks/` → R Markdown for step-by-step analysis
+- `outputs/` → figures, reports
+- `docs/` → research notes, methodology
+
+## ❓ Research Questions
+1.Market share of men's and women's fragrances
+2.Number of perfumes under each brands
+3.Market shaer of each category and type
+4.Gender preference of category and type
+5.Will type/Category influence longevity 
+
+## 🚀 Next Steps
+- Perform data cleaning (handle missing values, duplicates, normalize categories)
+- Conduct exploratory data analysis (EDA)
+- Build visualizations with `ggplot2`
+- Explore clustering/ML models (e.g., k-means, regression)
+
+# Data read and clearning
+
+```{r}
+# Read in csv
+
+perfume <- read.csv("Data/Perfumes_dataset.csv")
+
+# Standarise
+perfume <- perfume |>
+  janitor::clean_names() |>
+  dplyr::mutate(
+    brand           = stringr::str_squish(brand),
+    perfume         = stringr::str_squish(perfume),
+    type            = stringr::str_squish(stringr::str_to_lower(type)),        # e.g. "edp", "edt"
+    category        = stringr::str_squish(stringr::str_to_title(category)),    # "Fresh Scent" etc.
+    target_audience = stringr::str_squish(stringr::str_to_title(target_audience)), # "Male/Female/Unisex"
+    longevity       = stringr::str_squish(stringr::str_to_title(longevity))    # "Strong/Medium/..."
+  )
+
+
+```
+
+```{r}
+perfume[1:10,]
+glimpse(perfume)
+summary(perfume)
+```
+## Columns
+
+*brand* – The company or label that produces the perfume (e.g., Dumont).
+
+*perfume* – The name of the fragrance (e.g., Nitro Red).
+
+*type* – Concentration or formulation of the perfume (e.g., EDP – Eau de Parfum).
+
+*category* – Classification of the fragrance based on scent family or style (e.g., Fresh Scent, Woody Spicy, Oriental Vanilla).
+
+*target_audience* – The intended wearer of the perfume (e.g., Male, Female, Unisex).
+
+*longevity* – Expected performance in terms of duration on the skin (e.g., Strong, Medium).
+
+## Example Entries
+
+*Nitro Red (Dumont, EDP)* – A fresh scent designed for men with strong longevity.
+
+*Celerio Oros (Dumont, EDP)* – An oriental vanilla fragrance suitable for unisex wearers with medium longevity.
+
+*Nitro Black (Dumont, EDP)* – A woody spicy perfume for men with strong performance.
+
+```{r}
+# Find number of unique value in each column
+sapply(perfume, function(x) length(unique(x)))
+```
+## Q1 Market share of men's and women's fragrances
+
+```{r}
+count_share <- function(df, group_vars){
+  df |>
+    dplyr::count(dplyr::across({{ group_vars }}), name = "n") |>
+    dplyr::mutate(share = n / sum(n)) |>
+    dplyr::arrange(dplyr::desc(n))
+}
+
+market_share_all <- count_share(perfume, target_audience)
+print(market_share_all)
+```
+
+```{r}
+# (B) 只看男女（去掉或忽略 Unisex）
+market_share_mf <- perfume |>
+  dplyr::filter(target_audience %in% c("Male","Female")) |>
+  count_share(target_audience)
+cat("\n-- Male vs Female (excluding Unisex) --\n")
+print(market_share_mf)
+```
+
+
+```{r}
+
+
+market_share_all <- tibble::tibble(
+  target_audience = c("Male","Female","Unisex"),
+  n = c(375, 312, 88)
+) %>%
+  mutate(share = n / sum(n))
+
+pie_df <- market_share_all %>%
+  arrange(desc(share)) %>%
+  mutate(
+    label = paste0(target_audience, " (", percent(share, accuracy = 0.1), ")"),
+    ypos  = cumsum(share) - share/2   # 角度中点（配合 coord_polar(theta="y")）
+  )
+pie_df
+# 绘图
+ggplot(pie_df, aes(x = 1, y = share, fill = target_audience)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  # 外置标签：y 用中点 ypos，x 固定在半径=1，再用 nudge_x 往外推
+  geom_label_repel(
+    aes(y = ypos, label = label),
+    x = 1,                 # 半径位置
+    nudge_x = 0.6,         # 往外偏移，调大更靠外
+    direction = "y",       # 垂直方向排布更整齐
+    min.segment.length = 0, 
+    segment.size = 0.5,
+    segment.color = "grey40",
+    box.padding = 0.25,
+    point.padding = 0.2,
+    size = 4,
+    show.legend = FALSE
+  ) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Market Share of Fragrances by Target Audience",
+    fill  = "Target Audience"
+  ) +
+  theme_void(base_size = 14) +
+  theme(legend.position = "bottom")
+  
+```
+
+
+## Q2 Number of perfumes under each brands
+
+```{r}
+brand_counts <- perfume |>
+  dplyr::count(brand, name = "n") |>
+  dplyr::arrange(dplyr::desc(n))
+print(head(brand_counts, 20)) # 前 20 个品牌
+# 如果要全部，请直接 print(brand_counts)
+```
+
