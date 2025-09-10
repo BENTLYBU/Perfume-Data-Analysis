@@ -34,9 +34,8 @@ install_if_missing <- function(pkg){
 }
 
 # Install and load library
-pkgs <- c("readr","dplyr","tidyr","stringr","janitor","ggplot2","ggrepel")
+pkgs <- c("readr","dplyr","tidyr","stringr","janitor","ggplot2","ggrepel","scales","plotly","tibble")
 invisible(lapply(pkgs, install_if_missing))
-
 ```
 
 
@@ -128,17 +127,6 @@ print(market_share_all)
 ```
 
 ```{r}
-# (B) 只看男女（去掉或忽略 Unisex）
-market_share_mf <- perfume |>
-  dplyr::filter(target_audience %in% c("Male","Female")) |>
-  count_share(target_audience)
-cat("\n-- Male vs Female (excluding Unisex) --\n")
-print(market_share_mf)
-```
-
-
-```{r}
-
 
 market_share_all <- tibble::tibble(
   target_audience = c("Male","Female","Unisex"),
@@ -153,7 +141,7 @@ pie_df <- market_share_all %>%
     ypos  = cumsum(share) - share/2   # 角度中点（配合 coord_polar(theta="y")）
   )
 pie_df
-# 绘图
+# Draw the plot
 ggplot(pie_df, aes(x = 1, y = share, fill = target_audience)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
@@ -178,9 +166,162 @@ ggplot(pie_df, aes(x = 1, y = share, fill = target_audience)) +
   ) +
   theme_void(base_size = 14) +
   theme(legend.position = "bottom")
-  
+
 ```
 
+Large variance show the difference inside a category and shared range indicates the range of difference inside one category. Based on these two standerds, we can Select k brands that are most differentiated. With the help of heatmap, we can clearly see the dominance of the market share of these brands on gender difference.
+
+```{r}
+# ====== 统计：性别 x 类别（数量 + 类别内占比）======
+heat_df <- perfume %>%
+  count(target_audience, category, name = "n") %>%
+  group_by(category) %>%
+  mutate(share = n / sum(n)) %>%
+  ungroup()
+
+# ====== 工具函数：选择“有代表性”的类别 ======
+# method:
+# - "top_total": 选总量最高的前 k 个类别
+# - "most_divergent": 选性别占比差异（方差/极差）最大的前 k 个类别
+select_categories <- function(df, k = 20, method = c("top_total","most_divergent")){
+  method <- match.arg(method)
+  wide <- df %>%
+    select(category, target_audience, n, share) %>%
+    pivot_wider(names_from = target_audience, values_from = c(n, share), values_fill = 0)
+  
+  if (method == "top_total"){
+    picked <- wide %>%
+      mutate(total_n = rowSums(across(starts_with("n_")))) %>%
+      arrange(desc(total_n)) %>%
+      slice_head(n = min(k, nrow(.))) %>%
+      pull(category)
+  } else {
+    # 用“占比”的方差 + 极差 作为“差异度”打分
+    picked <- wide %>%
+      transmute(
+        category,
+        var_share  = apply(across(starts_with("share_")), 1, var),
+        range_share = apply(across(starts_with("share_")), 1, function(x) diff(range(x)))
+      ) %>%
+      mutate(score = 0.5*var_share + 0.5*range_share) %>%
+      arrange(desc(score)) %>%
+      slice_head(n = min(k, nrow(.))) %>%
+      pull(category)
+  }
+  picked
+}
+
+# ====== 工具函数：聚类/排序列顺序（让热力图更有结构）======
+# 对类别×性别矩阵做层次聚类，返回类别顺序
+cluster_category_order <- function(df, use = c("n","share")){
+  use <- match.arg(use)
+  mat <- df %>%
+    select(category, target_audience, !!sym(use)) %>%
+    pivot_wider(names_from = target_audience, values_from = !!sym(use), values_fill = 0) %>%
+    column_to_rownames("category") %>%
+    as.matrix()
+  # 用相关距离或欧式距离都可；占比用欧式通常够用
+  d <- dist(scale(mat, center = TRUE, scale = TRUE), method = "euclidean")
+  hc <- hclust(d, method = "ward.D2")
+  rownames(mat)[hc$order]
+}
+
+# ====== 主函数：画交互热力图（plotly）======
+# metric: "count" 或 "share"
+# pick_method: "top_total" 或 "most_divergent"
+# k: 展示的类别数量
+# cluster: 是否聚类排序
+plot_heatmap_q1 <- function(df = heat_df,
+                            metric = c("count","share"),
+                            pick_method = c("top_total","most_divergent"),
+                            k = 20,
+                            cluster = TRUE){
+  metric <- match.arg(metric)
+  pick_method <- match.arg(pick_method)
+  metric_col <- if (metric == "count") "n" else "share"
+  
+  cats <- select_categories(df, k = k, method = pick_method)
+  df_sub <- df %>% filter(category %in% cats)
+  
+  # 列顺序
+  if (cluster){
+    cat_order <- cluster_category_order(df_sub, use = if(metric=="count") "n" else "share")
+  } else {
+    # 非聚类时：按总量降序排
+    cat_order <- df_sub %>%
+      group_by(category) %>%
+      summarise(tot = sum(.data[[metric_col]]), .groups = "drop") %>%
+      arrange(desc(tot)) %>%
+      pull(category)
+  }
+  
+  # 组装矩阵和 hover 文本
+  mat <- df_sub %>%
+    mutate(category = factor(category, levels = cat_order),
+           target_audience = factor(target_audience, levels = c("Male","Female","Unisex"))) %>%
+    arrange(target_audience, category) %>%
+    select(category, target_audience, !!sym(metric_col)) %>%
+    pivot_wider(names_from = category, values_from = !!sym(metric_col), values_fill = 0) %>%
+    column_to_rownames("target_audience") %>%
+    as.matrix()
+  
+  # hover 信息：同时显示 count 和 share
+  hover_df <- df_sub %>%
+    mutate(category = factor(category, levels = cat_order),
+           target_audience = factor(target_audience, levels = c("Male","Female","Unisex"))) %>%
+    arrange(target_audience, category) %>%
+    select(category, target_audience, n, share) %>%
+    pivot_wider(names_from = category, values_from = c(n, share), values_fill = 0)
+  
+  # 生成和 mat 同维度的 hovertext
+  audience_levels <- rownames(mat)
+  hovertext <- matrix("", nrow = nrow(mat), ncol = ncol(mat))
+  for (i in seq_along(audience_levels)){
+    aud <- audience_levels[i]
+    n_vec     <- as.numeric(hover_df %>% filter(target_audience == aud) %>% select(starts_with("n_")) )
+    share_vec <- as.numeric(hover_df %>% filter(target_audience == aud) %>% select(starts_with("share_")) )
+    hovertext[i, ] <- paste0(
+      "Category: ", colnames(mat), "<br>",
+      "Audience: ", aud, "<br>",
+      "Count: ", n_vec, "<br>",
+      "Share-in-Category: ", scales::percent(share_vec, accuracy = 0.1)
+    )
+  }
+  
+  # 颜色条标题
+  colorbar_title <- if (metric == "count") "Count" else "Share"
+  
+  # 画图
+  plotly::plot_ly(
+    x = colnames(mat), y = rownames(mat),
+    z = mat,
+    type = "heatmap",
+    colors = "Blues",            # 连续色标
+    hoverinfo = "text",
+    text = hovertext,
+    showscale = TRUE,
+    colorbar = list(title = colorbar_title)
+  ) %>%
+    layout(
+      title = paste0("Gender × Category Heatmap (metric: ", colorbar_title, 
+                     ", pick: ", pick_method, ", k=", k, if (cluster) ", clustered" else "" ,")"),
+      xaxis = list(title = "Category", tickangle = 40, automargin = TRUE),
+      yaxis = list(title = "Target Audience", automargin = TRUE)
+    )
+}
+
+# ====== 调用示例 ======
+# 1) 用“数量”作图，选“最有差异”的 20 个类别，并做聚类排序
+p1 <- plot_heatmap_q1(metric = "count", pick_method = "most_divergent", k = 20, cluster = TRUE)
+p1
+
+# 2) 用“类别内占比”作图，选“总量最高”的 15 个类别，不聚类
+p2 <- plot_heatmap_q1(metric = "share", pick_method = "top_total", k = 15, cluster = FALSE)
+p2
+
+```
+
+From these two heat map, we can see that female are the main target audience of fragrance and 
 
 ## Q2 Number of perfumes under each brands
 
@@ -190,5 +331,125 @@ brand_counts <- perfume |>
   dplyr::arrange(dplyr::desc(n))
 print(head(brand_counts, 20)) # 前 20 个品牌
 # 如果要全部，请直接 print(brand_counts)
+```
+```{r}
+top10 <- brand_counts[1:10,]
+p_bar <- ggplot(top10, aes(x = brand, y = n, fill = brand)) +
+  geom_col(width = 0.7, color = "white") +
+  geom_text(aes(label = n), hjust = 1.02, size = 3.8) +     # 数字在条内右侧
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, .05))) +
+  scale_fill_brewer(palette = "Paired") +
+  labs(
+    title = "Top 10 Brands by Number of Perfumes",
+    x = "Brand", y = "Count", fill = "Brand"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        panel.grid.major.y = element_blank())
+print(p_bar)
+
+# ------------- B) Pie Chart (Top10 + Other) -------------
+# ---- Top 10 品牌数据 ----
+top10 <- perfume %>%
+  count(brand, name = "n") %>%
+  arrange(desc(n)) %>%
+  slice_max(n, n = 10) %>%
+  mutate(share = n / sum(n),
+         label = percent(share, accuracy = 0.1),
+         ypos = cumsum(share) - share/2)   # 每个扇区中点
+
+# ---- 绘制最简单的饼图 ----
+ggplot(top10, aes(x = 1, y = share, fill = brand)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(y = ypos, label = label),
+            color = "white", size = 4, fontface = "bold") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(
+    title = "Market Share of Top 10 Perfume Brands",
+    fill = "Brand"
+  ) +
+  theme_void(base_size = 14) +
+  theme(legend.position = "right")
+  
+```
+
+
+
+## Q3. Market share of each category and type
+
+```{r}
+
+category_share <- count_share(perfume, category)
+print(head(category_share, 20))
+
+type_share <- count_share(perfume, type)
+print(type_share)
+
+```
+
+## Q4. Gender preference of category and type
+
+
+```{r}
+gender_in_category <- perfume |>
+  dplyr::count(category, target_audience, name = "n") |>
+  dplyr::group_by(category) |>
+  dplyr::mutate(share_within_category = n / sum(n)) |>
+  dplyr::arrange(category, dplyr::desc(share_within_category)) |>
+  dplyr::ungroup()
+print(head(gender_in_category, 30))
+
+gender_in_type <- perfume |>
+  dplyr::count(type, target_audience, name = "n") |>
+  dplyr::group_by(type) |>
+  dplyr::mutate(share_within_type = n / sum(n)) |>
+  dplyr::arrange(type, dplyr::desc(share_within_type)) |>
+  dplyr::ungroup()
+print(gender_in_type)
+
+
+```
+
+## Q5. Will type/Category influence longevity?
+
+
+```{r}
+# ======================================================================
+#     通过卡方独立性检验 + Cramér's V（效应量）评估关联强度
+# ======================================================================
+cramers_v <- function(tbl){
+  # tbl: contingency table
+  chisq <- suppressWarnings(chisq.test(tbl))
+  chi2  <- unname(chisq$statistic)
+  n     <- sum(tbl)
+  r     <- nrow(tbl)
+  c     <- ncol(tbl)
+  V     <- sqrt(chi2 / (n * (min(r-1, c-1))))
+  list(
+    chisq_test = chisq,
+    cramer_v   = V
+  )
+}
+
+cat("\n================ Q5: Does TYPE influence LONGEVITY? ==================\n")
+tab_type_long <- table(perfume$type, perfume$longevity, useNA = "no")
+res_type_long <- cramers_v(tab_type_long)
+print(res_type_long$chisq_test)   # 显著性
+cat(sprintf("Cramer's V: %.3f\n", res_type_long$cramer_v))
+
+cat("\n================ Q5: Does CATEGORY influence LONGEVITY? ===============\n")
+tab_cat_long <- table(perfume$category, perfume$longevity, useNA = "no")
+res_cat_long <- cramers_v(tab_cat_long)
+print(res_cat_long$chisq_test)
+cat(sprintf("Cramer's V: %.3f\n", res_cat_long$cramer_v))
+
+# -------- Optional: quick plots (uncomment if needed) --------
+# ggplot(category_share, aes(x = reorder(category, share), y = share)) +
+#   geom_col() + coord_flip() + labs(x="Category", y="Share", title="Market share by category")
+#
+# ggplot(type_share, aes(x = reorder(type, share), y = share)) +
+#   geom_col() + coord_flip() + labs(x="Type", y="Share", title="Market share by type")
 ```
 
