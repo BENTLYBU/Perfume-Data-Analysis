@@ -1,11 +1,17 @@
 ---
 title: "Perfume"
-output: html_document
+output: 
+  html_document:
+    code_folding: hide
 date: "2025-09-09"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  echo = TRUE,     # 默认显示代码
+  message = FALSE,  # 不显示 library 的加载信息
+  warning = FALSE   # 不显示警告
+)
 ```
 
 # Perfume Dataset Analysis (R)
@@ -13,11 +19,10 @@ knitr::opts_chunk$set(echo = TRUE)
 This repository contains exploratory data analysis of the [Perfume Dataset](https://www.kaggle.com/datasets/ayushghawana/perfume-dataset) using **R**.
 
 ## 📌 Introduction
-Perfume is a lifestyle and fashion product that combines **brand identity, pricing, consumer preferences, and sensory attributes**.  
-This project aims to explore patterns within the perfume dataset to understand:
-- Category & Type
-- Brand distribution
-- Longevity and sillage (lasting power & scent projection)
+
+The global fragrance industry is both highly competitive and deeply shaped by cultural and consumer preferences. Beyond aesthetics, the market reflects evolving trends in gender identity, lifestyle choices, and purchasing behaviors. For brands, understanding these dynamics is critical in designing product portfolios, targeting marketing campaigns, and identifying opportunities for innovation.
+
+In this report, we analyze a curated dataset of perfumes covering multiple dimensions, including brand, type, category, target audience, and longevity. Our objective is to uncover patterns that reveal how different factors interact and shape consumer preferences.
 
 ## 🛠️ Tools
 - **RStudio / R Markdown**
@@ -114,6 +119,13 @@ sapply(perfume, function(x) length(unique(x)))
 ## Q1 Market share of men's and women's fragrances
 
 ```{r}
+count_share <- function(df, group_vars)
+{ df |> 
+    dplyr::count(dplyr::across({{ group_vars }}), name = "n") |> 
+    dplyr::mutate(share = n / sum(n)) |> dplyr::arrange(dplyr::desc(n)) 
+  } 
+market_share_all <- count_share(perfume, target_audience)
+
 market_share_all_fixed <- market_share_all %>%
   mutate(target_audience = recode(target_audience, "Men" = "Male", "Women" = "Female")) %>%
   group_by(target_audience) %>%
@@ -443,9 +455,10 @@ Emerging and Middle Eastern brands (Lattafa, Al Haramain, Fragrance World) are s
 
 ## Q3. Market share of each category and type
 
-```{r warning=False}
-
+```{r warning=FALSE}
+category_share <- count_share(perfume, category)
 top20_category <- head(category_share, 20)
+type_share <- count_share(perfume, type)
 
 ggplot(top20_category, aes(x = reorder(category, share), y = share, fill = category)) +
   geom_col(width = 0.7, color = "white") +
@@ -514,7 +527,6 @@ Opportunities exist in niche/light categories (e.g., fresh scents, aquatic types
 While EDP remains king, differentiation in EDT or niche formats could appeal to consumers seeking variety beyond the mainstream.
 
 ## Q4. Gender preference of category and type
-Q
 
 ```{r}
 gender_in_category <- perfume |>
@@ -689,4 +701,33 @@ For markets demanding long-lasting performance, brands should prioritize Extrait
 For everyday, casual consumers, the focus should be on EDT / fresh scents.
 
 This analysis bridges consumer expectations with product design decisions, helping brands position products more strategically.
+
+# Conclusion
+
+This analysis of the perfume dataset provides a structured view of how the fragrance market is shaped by audience preferences, brand strategies, product categories, and technical attributes such as type and longevity. From Q1 through Q5, several key insights emerge:
+
+Unisex fragrances are no longer niche (Q1).
+With over one-third of the market, unisex perfumes have surpassed both male- and female-targeted products, reflecting a broad cultural shift toward inclusivity and flexibility in personal expression.
+
+A few brands dominate through large product portfolios (Q2).
+Jean Paul Gaultier, Paris Corner, and Armaf together account for nearly half of the top 10 market share. Traditional luxury brands remain influential but compete more on brand equity than on sheer variety.
+
+Woody, spicy, and floral–oriental blends define the mainstream market (Q3).
+Categories such as Woody Spicy and Floriental capture the largest shares, while Eau de Parfum (EDP) is the overwhelmingly dominant type. Niche categories like fresh or aquatic scents remain underrepresented, yet may offer opportunities for differentiation.
+
+Gender preferences are statistically significant and structured (Q4).
+Chi-square tests confirm strong associations: floral and fruity categories are over-represented among female products, woody and spicy categories dominate male lines, while some blends (e.g., Amber Woody) successfully bridge into unisex markets. This highlights both the persistence of traditional preferences and areas of convergence.
+
+Longevity is shaped by structural choices (Q5).
+Certain categories and types are systematically associated with stronger or longer-lasting scents, suggesting that product design choices directly influence consumer perception of durability and value.
+
+📊 Strategic Takeaways
+
+Invest in unisex product lines: Demand for gender-neutral fragrances has become mainstream.
+
+Differentiate within dominant categories: The woody and floral–oriental spaces are crowded; innovation is required to stand out.
+
+Balance portfolio strategy: Brands can win either through scale (broad product ranges) or through premium positioning with smaller but iconic collections.
+
+Leverage longevity as a value driver: Positioning long-lasting perfumes within competitive categories may strengthen consumer trust and pricing power.
 
