@@ -1,0 +1,790 @@
+---
+title: "Perfume"
+output: 
+  html_document:
+    code_folding: hide
+date: "2025-09-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,     # 默认显示代码
+  message = FALSE,  # 不显示 library 的加载信息
+  warning = FALSE   # 不显示警告
+)
+```
+
+# Perfume Dataset Analysis (R)
+
+This repository contains exploratory data analysis of the [Perfume Dataset](https://www.kaggle.com/datasets/ayushghawana/perfume-dataset) using **R**.
+
+## 📌 Introduction
+
+The global fragrance industry is both highly competitive and deeply shaped by cultural and consumer preferences. Beyond aesthetics, the market reflects evolving trends in gender identity, lifestyle choices, and purchasing behaviors. For brands, understanding these dynamics is critical in designing product portfolios, targeting marketing campaigns, and identifying opportunities for innovation.
+
+In this report, we analyze a curated dataset of perfumes covering multiple dimensions, including brand, type, category, target audience, and longevity. Our objective is to uncover patterns that reveal how different factors interact and shape consumer preferences.
+
+## 🛠️ Tools
+- **RStudio / R Markdown**
+- R packages: `readr`,`dplyr`,`tidyr`,`stringr`,`janitor`,`ggplot2`,`ggrepel`,`scales`,`plotly`,`tibble`,`caret`,`randomForest`.
+
+```{r}
+# Define function to check is package is installed
+install_if_missing <- function(pkg){
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE, repos = "https://cloud.r-project.org/")
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# Install and load library
+pkgs <- c("readr","dplyr","tidyr","stringr","janitor","ggplot2","ggrepel","scales","plotly","tibble","vcd","caret","randomForest")
+invisible(lapply(pkgs, install_if_missing))
+```
+
+
+## 📂 Project Structure
+- `data/` → raw dataset and cleaned dataset
+- `scripts/` → R scripts for data cleaning, analysis, visualization, modeling
+- `notebooks/` → R Markdown for step-by-step analysis
+- `outputs/` → figures, reports
+- `docs/` → research notes, methodology
+
+## ❓ Research Questions
+- 1.Market share of men's and women's fragrances
+- 2.Number of perfumes under each brands
+- 3.Market share of each category and type
+- 4.Gender preference of category and type
+- 5.Will type/Category influence longevity 
+
+## 🚀 Next Steps
+- Perform data cleaning (handle missing values, duplicates, normalize categories)
+- Conduct exploratory data analysis (EDA)
+- Build visualizations with `ggplot2`
+- Perform statistical tests and present analysis
+
+## Data read and clearning
+
+```{r}
+# Read in csv
+
+perfume <- read.csv("../../Data/Perfumes_dataset.csv")
+
+# Standardize
+perfume <- perfume |>
+  janitor::clean_names() |>
+  dplyr::mutate(
+    brand           = stringr::str_squish(brand),
+    perfume         = stringr::str_squish(perfume),
+    type            = stringr::str_squish(stringr::str_to_lower(type)),        # e.g. "edp", "edt"
+    category        = stringr::str_squish(stringr::str_to_title(category)),    # "Fresh Scent" etc.
+    target_audience = stringr::str_squish(stringr::str_to_title(target_audience)), # "Male/Female/Unisex"
+    longevity       = stringr::str_squish(stringr::str_to_title(longevity))    # "Strong/Medium/..."
+  )
+
+
+```
+
+## EDA
+
+Lets have a look at the first 10 rows of the dataset and the structure of it.
+
+```{r}
+perfume[1:10,]
+glimpse(perfume)
+summary(perfume)
+```
+## Columns description
+
+***brand*** – The company or label that produces the perfume (e.g., Dumont).
+
+***perfume*** – The name of the fragrance (e.g., Nitro Red).
+
+***type*** – Concentration or formulation of the perfume (e.g., EDP – Eau de Parfum).
+
+***category*** – Classification of the fragrance based on scent family or style (e.g., Fresh Scent, Woody Spicy, Oriental Vanilla).
+
+***target_audience*** – The intended wearer of the perfume (e.g., Male, Female, Unisex).
+
+***longevity*** – Expected performance in terms of duration on the skin (e.g., Strong, Medium).
+
+## Example Entries
+
+***Nitro Red (Dumont, EDP)*** – A fresh scent designed for men with strong longevity.
+
+***Celerio Oros (Dumont, EDP)*** – An oriental vanilla fragrance suitable for unisex wearers with medium longevity.
+
+***Nitro Black (Dumont, EDP)*** – A woody spicy perfume for men with strong performance.
+
+Now, I will show you the number of unique value in each column.
+
+```{r}
+# Find number of unique value in each column
+sapply(perfume, function(x) length(unique(x)))
+```
+
+## Q1 Market share of men's and women's fragrances
+
+Fragrances are traditionally marketed along gender lines, yet consumer preferences are evolving with a growing demand for inclusivity. Understanding the balance between male, female, and unisex products provides insight into whether gender-neutral fragrances remain a niche segment or have become a central part of the market.
+
+In this dataset, we will aggregate male and men into one group, female and women into one group, since they represent the same gender. And in this report, I just focus on the Unisex, male and female. Here is the table of the table after aggregation. 
+
+```{r}
+count_share <- function(df, group_vars)
+{ df |> 
+    dplyr::count(dplyr::across({{ group_vars }}), name = "n") |> 
+    dplyr::mutate(share = n / sum(n)) |> dplyr::arrange(dplyr::desc(n)) 
+  } 
+market_share_all <- count_share(perfume, target_audience)
+
+market_share_all_fixed <- market_share_all %>%
+  mutate(target_audience = recode(target_audience, "Men" = "Male", "Women" = "Female")) %>%
+  group_by(target_audience) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
+  mutate(share = n / sum(n)) %>%
+  arrange(desc(n))
+
+print(market_share_all_fixed)
+```
+
+The piechart below can better visualize the accountance of the market share of these 3 genders.
+
+```{r}
+# Group Women and female, male and men.
+# Example data (replace with your actual counts/shares)
+audience_share <- data.frame(
+  target_audience = c("Male", "Female", "Unisex"),
+  share = c(0.295, 0.330, 0.374)
+)
+
+# Ensure factor levels in the right order
+audience_share <- audience_share %>%
+  mutate(target_audience = factor(target_audience, levels = c("Male","Female","Unisex")))
+
+# Pie chart
+ggplot(audience_share, aes(x = "", y = share, fill = target_audience)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = percent(share, accuracy = 0.1)),
+            position = position_stack(vjust = 0.5), size = 5) +
+  scale_fill_manual(
+    values = c("Male" = "tomato", "Female" = "seagreen3", "Unisex" = "steelblue")
+  ) +
+  labs(title = "Market Share of Fragrances by Target Audience",
+       fill = "Target Audience") +
+  theme_void(base_size = 14)
+
+```
+
+While the overall market share of male, female, and unisex fragrances provides a high-level view, it does not capture the nuances of how gender preferences vary across specific scent categories. To address this, we use a heatmap to compare gender distribution within categories. This visualization highlights which fragrance families are dominated by a particular audience, which are balanced across genders, and which categories serve as natural bridges between male, female, and unisex markets. By doing so, we can move beyond aggregate percentages and uncover the structural patterns that shape inclusivity and differentiation in the fragrance industry.
+
+```{r}
+#Large variance show the difference inside a category and shared range indicates the range of difference inside one category. Based on these two standerds, we can Select k brands that are most differentiated. With the help of heatmap, we can clearly see the dominance of the market share of these brands on gender difference.
+
+perfume <- perfume %>%
+  janitor::clean_names() %>%
+  mutate(
+    category        = str_squish(str_to_title(category)),
+    target_audience = str_squish(str_to_title(target_audience))
+  ) %>%
+  filter(target_audience %in% c("Male","Female","Unisex"),
+         !is.na(category), category != "")
+
+# ====== 统计：性别 x 类别（数量 + 类别内占比）======
+heat_df <- perfume %>%
+  count(target_audience, category, name = "n") %>%
+  group_by(category) %>%
+  mutate(share = n / sum(n)) %>%
+  ungroup()
+
+# ====== 工具函数：选择“有代表性”的类别 ======
+# method:
+# - "top_total": 选总量最高的前 k 个类别
+# - "most_divergent": 选性别占比差异（方差/极差）最大的前 k 个类别
+select_categories <- function(df, k = 20, method = c("top_total","most_divergent")){
+  method <- match.arg(method)
+  wide <- df %>%
+    select(category, target_audience, n, share) %>%
+    pivot_wider(names_from = target_audience, values_from = c(n, share), values_fill = 0)
+  
+  if (method == "top_total"){
+    picked <- wide %>%
+      mutate(total_n = rowSums(across(starts_with("n_")))) %>%
+      arrange(desc(total_n)) %>%
+      slice_head(n = min(k, nrow(.))) %>%
+      pull(category)
+  } else {
+    # 用“占比”的方差 + 极差 作为“差异度”打分
+    picked <- wide %>%
+      transmute(
+        category,
+        var_share  = apply(across(starts_with("share_")), 1, var),
+        range_share = apply(across(starts_with("share_")), 1, function(x) diff(range(x)))
+      ) %>%
+      mutate(score = 0.5*var_share + 0.5*range_share) %>%
+      arrange(desc(score)) %>%
+      slice_head(n = min(k, nrow(.))) %>%
+      pull(category)
+  }
+  picked
+}
+
+# ====== 工具函数：聚类/排序列顺序（让热力图更有结构）======
+# 对类别×性别矩阵做层次聚类，返回类别顺序
+cluster_category_order <- function(df, use = c("n","share")){
+  use <- match.arg(use)
+  mat <- df %>%
+    select(category, target_audience, !!sym(use)) %>%
+    pivot_wider(names_from = target_audience, values_from = !!sym(use), values_fill = 0) %>%
+    column_to_rownames("category") %>%
+    as.matrix()
+  # 用相关距离或欧式距离都可；占比用欧式通常够用
+  d <- dist(scale(mat, center = TRUE, scale = TRUE), method = "euclidean")
+  hc <- hclust(d, method = "ward.D2")
+  rownames(mat)[hc$order]
+}
+
+# ====== 主函数：画交互热力图（plotly）======
+# metric: "count" 或 "share"
+# pick_method: "top_total" 或 "most_divergent"
+# k: 展示的类别数量
+# cluster: 是否聚类排序
+plot_heatmap_q1 <- function(df = heat_df,
+                            metric = c("count","share"),
+                            pick_method = c("top_total","most_divergent"),
+                            k = 20,
+                            cluster = TRUE){
+  metric <- match.arg(metric)
+  pick_method <- match.arg(pick_method)
+  metric_col <- if (metric == "count") "n" else "share"
+  
+  cats <- select_categories(df, k = k, method = pick_method)
+  df_sub <- df %>% filter(category %in% cats)
+  
+  # 列顺序
+  if (cluster){
+    cat_order <- cluster_category_order(df_sub, use = if(metric=="count") "n" else "share")
+  } else {
+    # 非聚类时：按总量降序排
+    cat_order <- df_sub %>%
+      group_by(category) %>%
+      summarise(tot = sum(.data[[metric_col]]), .groups = "drop") %>%
+      arrange(desc(tot)) %>%
+      pull(category)
+  }
+  
+  # 组装矩阵和 hover 文本
+  mat <- df_sub %>%
+    mutate(category = factor(category, levels = cat_order),
+           target_audience = factor(target_audience, levels = c("Male","Female","Unisex"))) %>%
+    arrange(target_audience, category) %>%
+    select(category, target_audience, !!sym(metric_col)) %>%
+    pivot_wider(names_from = category, values_from = !!sym(metric_col), values_fill = 0) %>%
+    column_to_rownames("target_audience") %>%
+    as.matrix()
+  
+  # hover 信息：同时显示 count 和 share
+  hover_df <- df_sub %>%
+    mutate(category = factor(category, levels = cat_order),
+           target_audience = factor(target_audience, levels = c("Male","Female","Unisex"))) %>%
+    arrange(target_audience, category) %>%
+    select(category, target_audience, n, share) %>%
+    pivot_wider(names_from = category, values_from = c(n, share), values_fill = 0)
+  
+  # 生成和 mat 同维度的 hovertext
+  audience_levels <- rownames(mat)
+  hovertext <- matrix("", nrow = nrow(mat), ncol = ncol(mat))
+  for (i in seq_along(audience_levels)){
+    aud <- audience_levels[i]
+    n_vec     <- as.numeric(hover_df %>% filter(target_audience == aud) %>% select(starts_with("n_")) )
+    share_vec <- as.numeric(hover_df %>% filter(target_audience == aud) %>% select(starts_with("share_")) )
+    hovertext[i, ] <- paste0(
+      "Category: ", colnames(mat), "<br>",
+      "Audience: ", aud, "<br>",
+      "Count: ", n_vec, "<br>",
+      "Share-in-Category: ", scales::percent(share_vec, accuracy = 0.1)
+    )
+  }
+  
+  # 颜色条标题
+  colorbar_title <- if (metric == "count") "Count" else "Share"
+  
+  # 画图
+  plotly::plot_ly(
+    x = colnames(mat), y = rownames(mat),
+    z = mat,
+    type = "heatmap",
+    colors = "Blues",            # 连续色标
+    hoverinfo = "text",
+    text = hovertext,
+    showscale = TRUE,
+    colorbar = list(title = colorbar_title)
+  ) %>%
+    layout(
+      title = paste0("Gender × Category Heatmap (metric: ", colorbar_title, 
+                     ", pick: ", pick_method, ", k=", k, if (cluster) ", clustered" else "" ,")"),
+      xaxis = list(title = "Category", tickangle = 40, automargin = TRUE),
+      yaxis = list(title = "Target Audience", automargin = TRUE)
+    )
+}
+
+# ====== 调用示例 ======
+# 1) 用“数量”作图，选“最有差异”的 20 个类别，并做聚类排序
+p1 <- plot_heatmap_q1(metric = "count", pick_method = "most_divergent", k = 20, cluster = TRUE)
+p1
+
+# 2) 用“类别内占比”作图，选“总量最高”的 15 个类别，不聚类
+p2 <- plot_heatmap_q1(metric = "share", pick_method = "top_total", k = 15, cluster = FALSE)
+p2
+
+```
+
+### Conclusion
+
+Our analysis of target audiences and fragrance categories reveals both market-level distribution and gender-specific preferences.  
+
+Overall market distribution (Pie chart)  
+
+Unisex fragrances represent the largest share (37.4%), indicating a major shift toward inclusivity and flexibility in fragrance design.  
+
+Female fragrances account for 33.0%, showing sustained importance but no longer dominating the market.  
+
+Male fragrances make up 29.5%, the smallest segment, suggesting relative underrepresentation in product offerings.  
+
+Category differences in raw counts (Heatmap: Count, most divergent)  
+
+Certain floral categories (e.g., Floral Fruity, Floral Rose) show a heavy skew toward the female segment.  
+
+For males, representation in these categories is very low, confirming that floral profiles remain strongly gendered toward women.  
+
+This reflects the traditional cultural alignment between floral notes and femininity.  
+
+Category shares by audience (Heatmap: Share, top categories)  
+
+Male-oriented strength: Woody Spicy, Woody Aromatic, and Oriental Spicy categories are disproportionately male, highlighting men’s preference for deeper and spicier profiles.  
+
+Female-oriented strength: Floral Fruity, Oriental Floral, and Amber Floral are much more represented among women.  
+
+Unisex-oriented strength: Certain categories such as Woody Floral and Amber Woody show higher shares in unisex products, suggesting these categories act as “bridges” between male and female markets.  
+
+📊 **Key Insights**
+
+The fragrance market is no longer dominated by gendered products — unisex fragrances now hold the largest share.  
+
+
+Category preferences remain gendered, however:  
+
+Floral-based scents → largely female.  
+
+Woody/Spicy/Oriental → largely male.  
+
+Some blends (Woody Floral, Amber Woody) → well-suited to unisex positioning. 
+
+
+**Business implications**:  
+
+Brands should continue to invest in unisex lines, particularly around woody/floral blends that already appeal across genders.  
+
+For men, reinforcing woody and spicy scents aligns with current consumer demand.  
+For women, floral and fruity combinations remain central, but opportunities exist to innovate with more balanced profiles.  
+
+
+## Q2 Brands market share
+
+In a competitive industry, some brands rely on heritage and prestige, while others compete through product variety and scale. Examining which brands dominate in terms of product counts helps reveal different strategic approaches and highlights where market power is concentrated.
+
+```{r}
+brand_counts <- perfume |>
+  dplyr::count(brand, name = "n") |>
+  dplyr::arrange(dplyr::desc(n))
+print(head(brand_counts, 20)) # 前 20 个品牌
+# 如果要全部，请直接 print(brand_counts)
+```
+```{r}
+top10 <- brand_counts[1:10,]
+p_bar <- ggplot(top10, aes(x = brand, y = n, fill = brand)) +
+  geom_col(width = 0.7, color = "white") +
+  geom_text(aes(label = n), hjust = 1.02, size = 3.8) +     # 数字在条内右侧
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, .05))) +
+  scale_fill_brewer(palette = "Paired") +
+  labs(
+    title = "Top 10 Brands by Number of Perfumes",
+    x = "Brand", y = "Count", fill = "Brand"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        panel.grid.major.y = element_blank())
+print(p_bar)
+
+# ------------- B) Pie Chart (Top10 + Other) -------------
+# ---- Top 10 品牌数据 ----
+top10 <- perfume %>%
+  count(brand, name = "n") %>%
+  arrange(desc(n)) %>%
+  slice_max(n, n = 10) %>%
+  mutate(share = n / sum(n),
+         label = percent(share, accuracy = 0.1),
+         ypos = cumsum(share) - share/2)   # 每个扇区中点
+
+# ---- 绘制最简单的饼图 ----
+ggplot(top10, aes(x = 1, y = share, fill = brand)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(y = ypos, label = label),
+            color = "white", size = 4, fontface = "bold") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(
+    title = "Market Share of Top 10 Perfume Brands",
+    fill = "Brand"
+  ) +
+  theme_void(base_size = 14) +
+  theme(legend.position = "right")
+  
+```
+
+### Conclusion
+
+Our analysis of the top 10 perfume brands highlights the competitive landscape in terms of product portfolio size:
+
+Jean Paul Gaultier dominates
+
+With 94 perfumes, Jean Paul Gaultier leads the market by a significant margin.
+
+This represents the largest single brand share (19.2%) among the top 10, showing its strong focus on product variety and innovation.
+
+Strong challengers in the mid-range
+
+Paris Corner (77 perfumes, 15.7%) and Armaf (70 perfumes, 14.3%) follow closely, together holding nearly one-third of the market within the top 10 brands.
+
+These brands have built large and diverse portfolios, indicating aggressive strategies in product expansion.
+
+Other notable players
+
+Al Haramain (43, 8.6%), Fragrance World (42, 8.6%), and Lattafa (36, 7.1%) form a competitive mid-tier.
+
+Traditional luxury brands like Giorgio Armani (30, 6.1%), Hugo Boss (33, 6.7%), and Azzaro (35, 7.3%) maintain stable presence but with smaller portfolios relative to the leaders.
+
+📊 **Key Insights**
+
+Jean Paul Gaultier, Paris Corner, and Armaf collectively account for almost 50% of the top 10 market share, making them the clear leaders in terms of product variety.
+
+Luxury houses (Armani, Hugo Boss, Azzaro) have comparatively smaller portfolios, but they may rely more on brand equity and premium positioning than sheer volume.
+
+Emerging and Middle Eastern brands (Lattafa, Al Haramain, Fragrance World) are significant players, reflecting the globalization of perfume markets and the growing importance of niche/affordable luxury brands.
+
+## Q3. Market share of each category and type
+
+Beyond brands, fragrances are differentiated by scent families and technical types such as Eau de Parfum or Eau de Toilette. Identifying which categories and types hold the largest shares helps us understand the structural backbone of the industry and where innovation or niche opportunities may exist.
+
+```{r warning=FALSE}
+category_share <- count_share(perfume, category)
+top20_category <- head(category_share, 20)
+type_share <- count_share(perfume, type)
+
+ggplot(top20_category, aes(x = reorder(category, share), y = share, fill = category)) +
+  geom_col(width = 0.7, color = "white") +
+  coord_flip() +
+  geom_text(aes(label = percent(share, accuracy = 0.1)),
+            hjust = -0.1, size = 3.5) +
+  scale_y_continuous(labels = percent, expand = expansion(mult = c(0, 0.1))) +
+  scale_fill_brewer(palette = "Paired") +
+  labs(
+    title = "Market Share by Category (Top 20)",
+    x = "Category",
+    y = "Share"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+
+# ---- Barplot 2: Type ----
+ggplot(type_share, aes(x = reorder(type, share), y = share, fill = type)) +
+  geom_col(width = 0.7, color = "white") +
+  coord_flip() +
+  geom_text(aes(label = percent(share, accuracy = 0.1)),
+            hjust = -0.1, size = 3.5) +
+  scale_y_continuous(labels = percent, expand = expansion(mult = c(0, 0.1))) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Market Share by Type",
+    x = "Type",
+    y = "Share"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+### Conclusion
+
+***Category insights (Top 20)***
+
+Woody Spicy (14.4%) and Florential (13.0%) are the clear leaders, together covering over one-quarter of the market.
+
+Oriental Floral (8.7%) is also highly represented, reinforcing the dominance of complex floral–oriental blends.
+
+Secondary but still notable categories include Woody Aromatic (4.5%), Amber Floral (4.5%), and Floral Fruity (3.8%).
+
+The distribution shows that the market favors woody, spicy, and floral–oriental blends, while lighter categories such as Fresh Aquatic (1.2%) and Fresh Spicy (0.9%) remain niche.
+
+***Type insights***
+
+Eau de Parfum (EDP) overwhelmingly dominates with 76.9% of the market. This confirms that brands and consumers heavily prefer this concentration, balancing strength and wearability.
+
+Eau de Toilette (EDT) follows at 14.6%, serving as the lighter alternative but still significant.
+
+Other types such as Parfum (4.1%), Extrait de Parfum (1.9%), and Cologne (1.2%) represent much smaller shares, while formats like oil, concentrate, attar, alcohol-free remain marginal (<1%).
+
+📊 ***Key Insights***
+
+The fragrance market is highly concentrated in a few dominant categories: Woody, Spicy, and Floral–Oriental blends define the majority of offerings.
+
+EDP is the industry standard, dwarfing all other perfume types — showing that consumers value strong, long-lasting scents but not as extreme as pure Parfum or Extrait.
+
+***Business implications:***
+
+Brands competing in woody–spicy or floral–oriental spaces must differentiate strongly to stand out in a crowded field.
+
+Opportunities exist in niche/light categories (e.g., fresh scents, aquatic types) for targeting younger or seasonal consumers.
+
+While EDP remains king, differentiation in EDT or niche formats could appeal to consumers seeking variety beyond the mainstream.
+
+## Q4. Gender preference of category and type
+
+Consumer perceptions of fragrance families are often shaped by cultural associations with gender. Testing whether gender is independent from categories and types allows us to uncover systematic patterns of preference—highlighting which scent profiles are traditionally gendered, and which are bridging across audiences.
+
+```{r}
+gender_in_category <- perfume |>
+  dplyr::count(category, target_audience, name = "n") |>
+  dplyr::group_by(category) |>
+  dplyr::mutate(share_within_category = n / sum(n)) |>
+  dplyr::arrange(category, dplyr::desc(share_within_category)) |>
+  dplyr::ungroup()
+print(head(gender_in_category, 30))
+
+gender_in_type <- perfume |>
+  dplyr::count(type, target_audience, name = "n") |>
+  dplyr::group_by(type) |>
+  dplyr::mutate(share_within_type = n / sum(n)) |>
+  dplyr::arrange(type, dplyr::desc(share_within_type)) |>
+  dplyr::ungroup()
+print(gender_in_type)
+
+
+```
+
+```{r warning=FALSE}
+# ====== A) Gender × Category ======
+tab_cat <- table(perfume$target_audience, perfume$category)
+
+# 卡方检验
+chi_cat <- chisq.test(tab_cat)
+print(chi_cat)
+
+# Cramer's V
+cramer_v_cat <- sqrt(chi_cat$statistic / (sum(tab_cat) * (min(dim(tab_cat)) - 1)))
+cat("Cramer's V (Gender × Category):", cramer_v_cat, "\n")
+
+# 残差矩阵转长表
+resid_cat <- as.data.frame(as.table(chi_cat$residuals))
+colnames(resid_cat) <- c("Gender", "Category", "Residual")
+
+# Top 20 绝对残差
+top20_resid_cat <- resid_cat %>%
+  arrange(desc(abs(Residual))) %>%
+  slice_head(n = 20)
+
+# 可视化：残差条形图
+ggplot(top20_resid_cat, aes(x = reorder(paste(Category, Gender, sep=" - "), abs(Residual)),
+                            y = Residual, fill = Residual > 0)) +
+  geom_col(width = 0.7) +
+  coord_flip() +
+  scale_fill_manual(values=c("TRUE"="steelblue","FALSE"="tomato"),
+                    labels=c("FALSE"="Under-represented","TRUE"="Over-represented")) +
+  labs(title="Top 20 Residuals: Gender × Category",
+       x="Category - Gender", y="Pearson Residual", fill="Interpretation") +
+  theme_minimal(base_size=13)
+```
+
+### Conclusion
+
+***Strong gender signals in key categories***
+
+Woody Spicy – Male and Woody Aromatic – Male are significantly over-represented, confirming that woody and spicy scent families are strongly aligned with the male market.
+
+Florential – Female, Oriental Floral – Female, and Floral Fruity – Female are also highly over-represented, reflecting the cultural association between floral/ornamental scents and femininity.
+
+Under-representation highlights boundaries
+
+Woody Spicy – Female and Florential – Unisex are strongly under-represented, suggesting that these categories rarely cross into female or unisex positioning.
+
+Similarly, Oriental Floral – Unisex and Florential – Male appear much less than expected, reinforcing the persistence of gendered segmentation.
+
+***Unisex products occupy ambiguous ground***
+
+Some categories such as Unknown – Unisex and Amber Floral – Unisex show over-representation, indicating that when fragrances are not tied to traditional families, they may be marketed as unisex.
+
+However, in strongly gendered families (floral for women, woody/spicy for men), unisex positioning is under-represented.
+
+📌 ***Key Insights***
+
+Traditional gender associations remain strong: Floral families skew female, woody/spicy families skew male.
+
+Unisex positioning works best in “neutral” or “blended” categories rather than in traditionally gendered ones.
+
+Business implication: Brands aiming to expand unisex lines should focus on hybrid or less traditionally coded categories (e.g., amber, aromatic) rather than attempting to reframe strongly gendered ones.
+
+
+
+## Q5. Will type/Category influence longevity?
+
+```{r}
+# ====== 工具函数：Cramér’s V ======
+cramers_v <- function(tbl){
+  chisq <- suppressWarnings(chisq.test(tbl))
+  chi2  <- unname(chisq$statistic)
+  n     <- sum(tbl)
+  r     <- nrow(tbl)
+  c     <- ncol(tbl)
+  V     <- sqrt(chi2 / (n * (min(r-1, c-1))))
+  list(
+    chisq_test = chisq,
+    cramer_v   = V
+  )
+}
+
+# ====== A) Type × Longevity ======
+tab_type_long <- table(perfume$type, perfume$longevity)
+res_type_long <- cramers_v(tab_type_long)
+
+cat("\n== Q5: Type × Longevity ==\n")
+print(res_type_long$chisq_test)
+cat(sprintf("Cramer's V: %.3f\n", res_type_long$cramer_v))
+
+# 残差分析
+resid_type <- as.data.frame(as.table(res_type_long$chisq_test$residuals))
+colnames(resid_type) <- c("type", "longevity", "residual")
+
+# Top 20 绝对残差
+top20_type <- resid_type %>%
+  arrange(desc(abs(residual))) %>%
+  slice_head(n = 20)
+
+ggplot(top20_type, aes(x = reorder(paste(type, longevity, sep = " - "), abs(residual)),
+                       y = residual, fill = residual > 0)) +
+  geom_col(width = 0.7) +
+  coord_flip() +
+  scale_fill_manual(values = c("TRUE" = "steelblue", "FALSE" = "tomato"),
+                    labels = c("FALSE" = "Under-represented", "TRUE" = "Over-represented")) +
+  labs(
+    title = "Top 20 Residuals: Type × Longevity",
+    x = "Type - Longevity",
+    y = "Pearson Residual",
+    fill = "Interpretation"
+  ) +
+  theme_minimal(base_size = 13)
+
+
+# ====== B) Category × Longevity ======
+tab_cat_long <- table(perfume$category, perfume$longevity)
+res_cat_long <- cramers_v(tab_cat_long)
+
+cat("\n== Q5: Category × Longevity ==\n")
+print(res_cat_long$chisq_test)
+cat(sprintf("Cramer's V: %.3f\n", res_cat_long$cramer_v))
+
+# 残差分析
+resid_cat <- as.data.frame(as.table(res_cat_long$chisq_test$residuals))
+colnames(resid_cat) <- c("category", "longevity", "residual")
+
+# Top 20 绝对残差
+top20_cat <- resid_cat %>%
+  arrange(desc(abs(residual))) %>%
+  slice_head(n = 20)
+
+ggplot(top20_cat, aes(x = reorder(paste(category, longevity, sep = " - "), abs(residual)),
+                      y = residual, fill = residual > 0)) +
+  geom_col(width = 0.7) +
+  coord_flip() +
+  scale_fill_manual(values = c("TRUE" = "steelblue", "FALSE" = "tomato")) +
+  labs(
+    title = "Top 20 Residuals: Category × Longevity",
+    x = "Category - Longevity",
+    y = "Pearson Residual",
+    fill = "Interpretation"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+### conclusion
+
+Our analysis focused on the relationship between fragrance type/category and longevity.  
+
+Using chi-square tests and residual analysis, we found a statistically significant association between the two, with very clear directional patterns.  
+
+***Long-Lasting Fragrances (Very Strong / Strong)***  
+
+Extrait de Parfum (high-concentration perfumes) is heavily over-represented in the Very Strong longevity group. This aligns perfectly with product positioning: higher concentrations naturally lead to longer-lasting scents.  
+
+Woody, Oud, and Rose categories are also strongly over-represented in the Strong group, showing that these ingredients are typically linked with longer longevity.  
+
+Conclusion: High-concentration formats combined with deep woody/rose-based notes are the typical market choice for long-lasting perfumes.  
+
+***Lighter Longevity (Light / Medium)***  
+
+Eau de Toilette (EDT) is strongly over-represented in the Light group and severely under-represented in the Strong group.  
+
+Similarly, fresh and floral light categories tend to underperform in the Medium group, indicating a preference for shorter, lighter experiences.  
+
+Conclusion: Lighter concentrations and fresher scent profiles naturally lean toward shorter-lasting usage.  
+
+***Under-Represented Segments***
+
+Many Floral and Oriental Floral fragrances are under-represented in the Medium group. This suggests a “polarized” pattern: they are either formulated as light, fleeting perfumes or pushed directly into strong, long-lasting territory.
+
+Conclusion: Certain categories show a two-pole distribution, rarely occupying the middle ground.
+
+📊 ***Key Insights***
+
+Type and category do influence longevity, and the findings are consistent with fragrance industry intuition:
+
+Higher concentration + heavier notes → longer-lasting scents.
+
+Lower concentration + fresher notes → lighter, shorter-lasting scents.
+
+Business implications:
+
+For markets demanding long-lasting performance, brands should prioritize Extrait de Parfum formats and emphasize Woody / Oud / Rose compositions.
+
+For everyday, casual consumers, the focus should be on EDT / fresh scents.
+
+This analysis bridges consumer expectations with product design decisions, helping brands position products more strategically.
+
+# Conclusion Report
+
+This analysis of the perfume dataset provides a structured view of how the fragrance market is shaped by audience preferences, brand strategies, product categories, and technical attributes such as type and longevity. From Q1 through Q5, several key insights emerge:
+
+Unisex fragrances are no longer niche (Q1).
+With over one-third of the market, unisex perfumes have surpassed both male- and female-targeted products, reflecting a broad cultural shift toward inclusivity and flexibility in personal expression.
+
+A few brands dominate through large product portfolios (Q2).
+Jean Paul Gaultier, Paris Corner, and Armaf together account for nearly half of the top 10 market share. Traditional luxury brands remain influential but compete more on brand equity than on sheer variety.
+
+Woody, spicy, and floral–oriental blends define the mainstream market (Q3).
+Categories such as Woody Spicy and Floriental capture the largest shares, while Eau de Parfum (EDP) is the overwhelmingly dominant type. Niche categories like fresh or aquatic scents remain underrepresented, yet may offer opportunities for differentiation.
+
+Gender preferences are statistically significant and structured (Q4).
+Chi-square tests confirm strong associations: floral and fruity categories are over-represented among female products, woody and spicy categories dominate male lines, while some blends (e.g., Amber Woody) successfully bridge into unisex markets. This highlights both the persistence of traditional preferences and areas of convergence.
+
+Longevity is shaped by structural choices (Q5).
+Certain categories and types are systematically associated with stronger or longer-lasting scents, suggesting that product design choices directly influence consumer perception of durability and value.
+
+📊 ***Strategic Takeaways***
+
+Invest in unisex product lines: Demand for gender-neutral fragrances has become mainstream.
+
+Differentiate within dominant categories: The woody and floral–oriental spaces are crowded; innovation is required to stand out.
+
+Balance portfolio strategy: Brands can win either through scale (broad product ranges) or through premium positioning with smaller but iconic collections.
+
+Leverage longevity as a value driver: Positioning long-lasting perfumes within competitive categories may strengthen consumer trust and pricing power.
+
